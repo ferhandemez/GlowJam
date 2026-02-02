@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glow Jam</title>
+    <style>
+        :root {
+            --bg-dark: #0f0f11;
+            --cell-paintable: #1c1c1f;
+            --toggle-bg: #27272a;
+            --text-color: #e4e4e7;
+            --neon-green: #39FF14;
+        }
+
+        body {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100vh; margin: 0; background-color: var(--bg-dark);
+            font-family: 'Segoe UI', 'Roboto', sans-serif; /* Daha okunaklı font ailesi */
+            color: var(--text-color);
+            user-select: none;
+        }
+
+        .grid-container {
+            display: grid; grid-template-columns: repeat(10, 52px); grid-template-rows: repeat(10, 52px);
+            gap: 5px; background-color: #000; padding: 12px; border: 1px solid #333;
+            border-radius: 12px;
+            position: relative;
+        }
+
+        .cell {
+            width: 52px; height: 52px; border-radius: 6px; 
+            transition: all 0.2s ease;
+            position: relative;
+            box-sizing: border-box;
+        }
+
+        /* BOYANABİLİR HÜCRE */
+        .paintable { 
+            background-color: var(--cell-paintable); 
+            border: 1px solid #333;
+        }
+
+        /* VOID */
+        .void { background-color: var(--bg-dark); pointer-events: none; opacity: 0; }
+
+        /* TOGGLE */
+        .toggle {
+            cursor: pointer; 
+            background-color: var(--toggle-bg); 
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            border: 2px solid #555;
+            /* YAZI AYARLARI GÜNCELLENDİ */
+            font-size: 15px; 
+            font-weight: 800; /* Ekstra kalın */
+            color: #888;
+            z-index: 10;
+            transition: border-color 0.3s, color 0.3s, box-shadow 0.3s;
+        }
+
+        .toggle[data-active="true"] {
+            background-color: var(--toggle-bg) !important;
+            box-shadow: inset 0 0 15px rgba(0,0,0,0.9);
+        }
+
+        .counter {
+            background-color: rgba(0,0,0,0.6);
+            padding: 4px 6px; border-radius: 6px;
+            pointer-events: none;
+            display: flex; gap: 4px;
+            letter-spacing: 0.5px;
+        }
+        
+        .toggle[data-status="correct"] .counter { 
+            border: 2px solid var(--neon-green); 
+            background-color: rgba(0,0,0,0.8);
+            color: var(--neon-green);
+        }
+        .toggle[data-status="over"] .current-score { color: #ff4444; }
+
+        /* Başlıklar BÜYÜTÜLDÜ */
+        .header { margin-bottom: 25px; text-align: center; }
+        h1 { margin: 0; letter-spacing: 2px; font-size: 2.5rem; color: #fff; font-weight: 900; }
+        p { font-size: 1.2rem; color: #888; margin-top: 5px; }
+        
+        /* Win Overlay BÜYÜTÜLDÜ */
+        #win-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.92); display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.5s; z-index: 100;
+            backdrop-filter: blur(5px);
+        }
+        #win-overlay.visible { opacity: 1; pointer-events: all; }
+        .win-text { 
+            font-size: 3.5rem; font-weight: 900; 
+            color: var(--neon-green); margin-bottom: 30px; 
+            text-align: center; line-height: 1.1;
+            text-shadow: 0 0 30px rgba(57, 255, 20, 0.3);
+        }
+        .restart-btn {
+            padding: 15px 40px; background: transparent;
+            border: 3px solid var(--neon-green); color: var(--neon-green);
+            cursor: pointer; font-family: inherit; font-size: 1.2rem; font-weight: bold;
+            transition: 0.2s; letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .restart-btn:hover { background: var(--neon-green); color: black; box-shadow: 0 0 20px var(--neon-green); }
+
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>GLOW JAM</h1>
+        <p>Min Target: 1</p>
+    </div>
+
+    <div id="game-container" style="position: relative;">
+        <div id="grid" class="grid-container"></div>
+        
+        <div id="win-overlay">
+            <div class="win-text">LEVEL<br>COMPLETE</div>
+            <button class="restart-btn" onclick="initGame()">NEXT LEVEL</button>
+        </div>
+    </div>
+
+    <script>
+        const gridElement = document.getElementById('grid');
+        const overlay = document.getElementById('win-overlay');
+        const rows = 10, cols = 10;
+        
+        let toggles = []; 
+        let activeStack = []; 
+
+        initGame();
+
+        function initGame() {
+            gridElement.innerHTML = '';
+            toggles = [];
+            activeStack = [];
+            overlay.classList.remove('visible');
+
+            createGridAndAssignColors();
+            refineGridLogic();
+        }
+
+        function createGridAndAssignColors() {
+            let layout = [];
+            let toggleCount = 0;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const rand = Math.random();
+                    let type = 'paintable';
+                    if (rand < 0.18) { type = 'toggle'; toggleCount++; } 
+                    else if (rand < 0.28) { type = 'void'; }
+                    
+                    layout.push({ r, c, type });
+                }
+            }
+
+            const colors = generateUniqueColors(toggleCount);
+            let colorIndex = 0;
+
+            layout.forEach(cellData => {
+                const cell = document.createElement('div');
+                cell.classList.add('cell');
+                cell.id = `cell-${cellData.r}-${cellData.c}`;
+                cell.dataset.r = cellData.r;
+                cell.dataset.c = cellData.c;
+
+                if (cellData.type === 'void') {
+                    cell.classList.add('void');
+                } else if (cellData.type === 'paintable') {
+                    cell.classList.add('paintable');
+                } else if (cellData.type === 'toggle') {
+                    const uniqueColor = colors[colorIndex++];
+                    setupToggle(cell, cellData.r, cellData.c, uniqueColor);
+                }
+                gridElement.appendChild(cell);
+            });
+        }
+
+        function generateUniqueColors(count) {
+            let colors = [];
+            for (let i = 0; i < count; i++) {
+                const hue = Math.floor((i * 360) / count); 
+                colors.push(`hsl(${hue}, 85%, 60%)`);
+            }
+            return colors.sort(() => Math.random() - 0.5);
+        }
+
+        function setupToggle(cell, r, c, color) {
+            const toggleId = `toggle-${r}-${c}`;
+            cell.classList.add('toggle');
+            cell.dataset.id = toggleId;
+            cell.dataset.color = color;
+            cell.dataset.active = "false";
+            cell.dataset.target = 0;
+            cell.style.setProperty('--toggle-color', color); 
+
+            cell.innerHTML = `
+                <div class="counter" style="color: inherit">
+                    <span class="current-score">0</span>
+                    <span style="opacity:0.5; font-weight:normal">/</span>
+                    <span class="target-score">-</span>
+                </div>
+            `;
+            toggles.push({ element: cell, r, c, color, id: toggleId });
+        }
+
+        function refineGridLogic() {
+            let simulationOrder = [...toggles].sort(() => Math.random() - 0.5);
+            let simulationStack = simulationOrder.map(t => ({ id: t.id, r: t.r, c: t.c, color: t.color }));
+
+            let ownershipCounts = calculateOwnership(simulationStack);
+
+            let validToggles = [];
+            
+            toggles.forEach(t => {
+                const target = ownershipCounts[t.id] || 0;
+                if (target > 0) {
+                    t.element.dataset.target = target;
+                    t.element.querySelector('.target-score').innerText = target;
+                    t.element.addEventListener('click', () => handleToggleClick(t.element, t.r, t.c, t.color));
+                    validToggles.push(t);
+                } else {
+                    convertToggleToPaintable(t.element);
+                }
+            });
+
+            toggles = validToggles;
+            
+            const finalStack = simulationStack.filter(item => 
+                validToggles.some(vt => vt.id === item.id)
+            );
+            
+            const finalCounts = calculateOwnership(finalStack);
+            
+            toggles.forEach(t => {
+                t.element.dataset.target = finalCounts[t.id];
+                t.element.querySelector('.target-score').innerText = finalCounts[t.id];
+            });
+        }
+
+        function calculateOwnership(stack) {
+            let counts = {};
+            stack.forEach(item => counts[item.id] = 0);
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                if (cell.classList.contains('void')) return;
+                if (!cell.classList.contains('paintable')) return;
+
+                const r = parseInt(cell.dataset.r);
+                const c = parseInt(cell.dataset.c);
+
+                for (let i = stack.length - 1; i >= 0; i--) {
+                    const t = stack[i];
+                    if (Math.abs(t.r - r) <= 1 && Math.abs(t.c - c) <= 1) {
+                        if (counts[t.id] !== undefined) counts[t.id]++;
+                        break;
+                    }
+                }
+            });
+            return counts;
+        }
+
+        function convertToggleToPaintable(element) {
+            element.classList.remove('toggle');
+            element.classList.add('paintable');
+            element.innerHTML = '';
+            element.style = '';
+            delete element.dataset.id;
+            delete element.dataset.color;
+            delete element.dataset.active;
+            delete element.dataset.target;
+        }
+
+        function handleToggleClick(cell, r, c, color) {
+            const isActive = cell.dataset.active === "true";
+            const toggleId = cell.dataset.id;
+
+            if (!isActive) {
+                activeStack.push({ id: toggleId, r, c, color });
+                cell.dataset.active = "true";
+                cell.style.borderColor = color;
+                cell.style.color = color;
+                cell.style.boxShadow = `0 0 20px ${color}50`;
+            } else {
+                activeStack = activeStack.filter(item => item.id !== toggleId);
+                cell.dataset.active = "false";
+                cell.style.borderColor = "#555";
+                cell.style.color = "#888";
+                cell.style.boxShadow = "none";
+            }
+            recalculateBoard();
+        }
+
+        function recalculateBoard() {
+            let currentCounts = {};
+            toggles.forEach(t => currentCounts[t.id] = 0);
+
+            const paintables = document.querySelectorAll('.paintable');
+            
+            paintables.forEach(cell => {
+                const r = parseInt(cell.dataset.r);
+                const c = parseInt(cell.dataset.c);
+                let foundColor = null;
+                let ownerId = null;
+
+                for (let i = activeStack.length - 1; i >= 0; i--) {
+                    const t = activeStack[i];
+                    if (Math.abs(t.r - r) <= 1 && Math.abs(t.c - c) <= 1) {
+                        foundColor = t.color;
+                        ownerId = t.id;
+                        break; 
+                    }
+                }
+
+                if (foundColor) {
+                    cell.style.backgroundColor = foundColor;
+                    cell.style.boxShadow = `0 0 15px ${foundColor}`;
+                    cell.style.borderColor = foundColor;
+                    if(ownerId && currentCounts[ownerId] !== undefined) currentCounts[ownerId]++;
+                } else {
+                    cell.style.backgroundColor = '';
+                    cell.style.boxShadow = '';
+                    cell.style.borderColor = '';
+                }
+            });
+
+            let totalCorrect = 0;
+            
+            toggles.forEach(t => {
+                const current = currentCounts[t.id];
+                const target = parseInt(t.element.dataset.target);
+                
+                t.element.querySelector('.current-score').innerText = current;
+
+                if (current === target) {
+                    t.element.setAttribute('data-status', 'correct');
+                    totalCorrect++;
+                } else if (current > target) {
+                    t.element.setAttribute('data-status', 'over');
+                } else {
+                    t.element.removeAttribute('data-status');
+                }
+            });
+
+            if (totalCorrect === toggles.length && toggles.length > 0) {
+                setTimeout(() => {
+                    overlay.classList.add('visible');
+                }, 100);
+            }
+        }
+    </script>
+</body>
+</html>
